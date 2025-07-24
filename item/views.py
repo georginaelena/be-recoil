@@ -8,6 +8,17 @@ from django.views.decorators.csrf import csrf_exempt
 from storages.backends.s3boto3 import S3Boto3Storage
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.decorators import parser_classes
+from math import radians, cos, sin, asin, sqrt
+
+def haversine(lat1, lon1, lat2, lon2):
+    """Calculate the great circle distance between two points on the earth (specified in decimal degrees)"""
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    r = 6371  # Radius of earth in kilometers
+    return c * r
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -194,8 +205,12 @@ def my_items(request):
 @permission_classes([IsAuthenticated])
 @csrf_exempt
 def get_all_items(request):
-    """Get marketplace items - members see agent products, agents see member products"""
+    """Get marketplace items - members see agent products, agents see member products, sorted by distance"""
     user = request.user
+    
+    # Check if user has location set
+    if not user.latitude or not user.longitude:
+        return JsonResponse({'error': 'Your location is not set.'}, status=400)
     
     # Check if user is an agent first (takes priority)
     is_agent = hasattr(user, 'agent')
@@ -205,13 +220,24 @@ def get_all_items(request):
     if not isinstance(user, Member):
         return JsonResponse({"status": "error", "message": "Authentication required"}, status=403)
     
+    items_list = []
+    
     # Query items based on user type
     if is_agent:
-        # Agents see member items
-        items = Item.objects.filter(member__isnull=False).select_related('member')
+        # Agents see member items (only those with valid location)
+        items = Item.objects.filter(
+            member__isnull=False,
+            member__latitude__isnull=False,
+            member__longitude__isnull=False
+        ).select_related('member')
         
-        items_list = []
         for item in items:
+            # Calculate distance between user and item owner
+            dist = haversine(
+                user.latitude, user.longitude, 
+                item.member.latitude, item.member.longitude
+            )
+            
             items_list.append({
                 "id": item.id,
                 "name": item.name,
@@ -224,13 +250,23 @@ def get_all_items(request):
                 "unit": item.unit if hasattr(item, 'unit') else None,
                 "created_at": item.created_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(item, 'created_at') else None,
                 "image_url": item.image.url if item.image else None,
+                "distance_km": round(dist, 2),
             })
     else:  # is_member
-        # Members see agent items
-        items = Item.objects.filter(agent__isnull=False).select_related('agent')
+        # Members see agent items (only those with valid location)
+        items = Item.objects.filter(
+            agent__isnull=False,
+            agent__user__latitude__isnull=False,
+            agent__user__longitude__isnull=False
+        ).select_related('agent')
         
-        items_list = []
         for item in items:
+            # Calculate distance between user and item owner (agent)
+            dist = haversine(
+                user.latitude, user.longitude, 
+                item.agent.user.latitude, item.agent.user.longitude
+            )
+            
             items_list.append({
                 "id": item.id,
                 "name": item.name,
@@ -243,7 +279,12 @@ def get_all_items(request):
                 "unit": item.unit if hasattr(item, 'unit') else None,
                 "created_at": item.created_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(item, 'created_at') else None,
                 "image_url": item.image.url if item.image else None,
+                "distance_km": round(dist, 2),
+
             })
+    
+    # Sort by distance (nearest first)
+    items_list.sort(key=lambda x: x['distance_km'])
     
     return JsonResponse({
         "status": "success",

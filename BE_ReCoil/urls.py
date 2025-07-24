@@ -25,4 +25,5 @@ urlpatterns = [
     path('chatbot/', include('chatbot.urls')),
     path('item/', include('item.urls')),
     path('community/', include('community.urls')),
+    path('transaction/', include('transaction.urls')),
 ]

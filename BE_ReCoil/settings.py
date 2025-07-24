@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'chatbot',
     'item',
     'community',
+    'transaction',
 ]
 
 AUTH_USER_MODEL = 'member.Member'
