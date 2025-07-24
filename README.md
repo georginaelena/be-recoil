@@ -4,7 +4,7 @@ ReCoil is a sustainable web based application developed as part of **Garuda Hack
 
 ---
 
-## 🌟 Overview
+## Overview
 
 Every drop of waste oil has value. With ReCoil, we make sure it's not wasted. Our platform connects two main user roles **Members** and **Agents**, to facilitate the exchange of used oil and oil-based products through a transparent and user-friendly system.
 
@@ -12,7 +12,7 @@ ReCoil isn't just a website. It's a **community** and **educational platform**, 
 
 ---
 
-## 📱 Key Features
+## Key Features
 
 ### 🔄 Eco Exchange  
 - **Sell Used Oil**: Members can sell used cooking or motor oil to Agents through a bargaining mechanism.  
@@ -52,7 +52,7 @@ ReCoil isn't just a website. It's a **community** and **educational platform**, 
 - **Database**: NeonDB (PostgreSQL)  
 - **AI Integration**: OpenAI API (for Chatbot)  
 - **Cloud Storage**: AWS S3 (for image & file uploads)  
-- **Deployment**: Vercel (Frontend), AWS (Backend)
+- **Deployment**: Vercel (Frontend), Koyeb (Backend)
 
 ---
 
