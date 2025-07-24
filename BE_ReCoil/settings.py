@@ -14,6 +14,7 @@ from pathlib import Path
 from datetime import timedelta
 import os
 from dotenv import load_dotenv
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -99,18 +100,18 @@ WSGI_APPLICATION = 'BE_ReCoil.wsgi.application'
 if os.getenv('KOYEB_DEPLOYMENT'):
     # Production database on Koyeb persistent disk
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': '/data/db.sqlite3',  # Koyeb persistent disk path
-        }
+        'default': dj_database_url.config(
+            default=os.environ.get('DATABASE_URL'),
+            conn_max_age=600
+        )
     }
     
     # Static files for production
-    STATIC_ROOT = '/data/static/'
-    MEDIA_ROOT = '/data/media/'
+    # STATIC_ROOT = '/data/static/'
+    # MEDIA_ROOT = '/data/media/'
     
     # Set DEBUG to False in production
-    DEBUG = False
+    # DEBUG = False
 else:
     # Development database (your existing setup)
     DATABASES = {
