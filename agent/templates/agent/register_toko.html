@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register Store - ReCoil</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-tr from-green-100 to-green-200 min-h-screen flex items-center justify-center">
+    <div class="flex flex-col md:flex-row bg-white rounded-2xl shadow-lg overflow-hidden max-w-4xl w-full">
+        <div class="flex-1 p-10 flex flex-col justify-center">
+            <h2 class="text-3xl font-bold mb-2">Register Store</h2>
+            <p class="text-gray-500 mb-6">Enter your store details to join the ReCoil network as an agent.</p>
+            <form method="post" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-gray-700">Store Name</label>
+                    <input type="text" name="store_name" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300" required>
+                </div>
+                <div>
+                    <label class="block text-gray-700">Description</label>
+                    <textarea name="description" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300" required></textarea>
+                </div>
+                <div>
+                    <label class="block text-gray-700">Alamat</label>
+                    <input type="text" name="alamat" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-300" required>
+                </div>
+                <button type="submit" class="w-full bg-green-400 hover:bg-green-500 text-white font-semibold py-2 rounded-lg transition">Next: Register Agent</button>
+            </form>
+            {% for message in messages %}<p class="text-red-500 mt-2">{{ message }}</p>{% endfor %}
+        </div>
+        <div class="flex-1 bg-gradient-to-tr from-green-100 to-yellow-100 flex items-center justify-center">
+            <img src="https://img.freepik.com/free-vector/store-location-concept-illustration_114360-5165.jpg" alt="Store Illustration" class="w-80">
+        </div>
+    </div>
+</body>
+</html> 

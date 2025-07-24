@@ -1,2 +1,16 @@
 django
-django-cors-headers
+gunicorn
+whitenoise
+psycopg2-binary
+requests
+urllib3
+django-storages
+
+# API & Authentication
+djangorestframework
+djangorestframework-simplejwt
+
+# Google OAuth
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
