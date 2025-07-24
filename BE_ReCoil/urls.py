@@ -22,6 +22,6 @@ urlpatterns = [
     path('api/', include('main.urls')),
     path('member/', include('member.urls')),
     path('agent/', include('agent.urls')),
-    # path('chatbot/', include('chatbot.urls')),
+    path('chatbot/', include('chatbot.urls')),
     path('item/', include('item.urls')),
 ]

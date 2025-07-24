@@ -54,7 +54,7 @@ INSTALLED_APPS = [
     'main',
     'agent',
     'member',
-    # 'chatbot',
+    'chatbot',
     'item',
 ]
 
