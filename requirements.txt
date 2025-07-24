@@ -20,4 +20,4 @@ Boto3
 Pillow
 openai
 python-dotenv
-
+django-cors-headers

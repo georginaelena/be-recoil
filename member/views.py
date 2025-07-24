@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 from math import radians, cos, sin, asin, sqrt
 from rest_framework.decorators import api_view, permission_classes
+from django.http import HttpResponseRedirect
+from urllib.parse import urlencode
 
 # Create your views here.
 
@@ -306,18 +308,35 @@ class GoogleOAuthCallbackAPIView(APIView):
             # Get authorization code from URL parameters
             code = request.GET.get('code')
             state = request.GET.get('state')
+            error = request.GET.get('error')
+            
+            # Check if user denied access
+            if error:
+                error_params = {
+                    'error': 'oauth_denied',
+                    'message': 'Google OAuth access was denied'
+                }
+                error_url = f"https://fe-recoil.vercel.app/login?{urlencode(error_params)}"
+                return HttpResponseRedirect(error_url)
             
             if not code:
-                return Response({
-                    'error': 'Authorization code not provided'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                # Redirect to frontend with error if no code provided
+                error_params = {
+                    'error': 'oauth_failed',
+                    'message': 'Authorization code not provided. Please try logging in again.'
+                }
+                error_url = f"https://fe-recoil.vercel.app/login?{urlencode(error_params)}"
+                return HttpResponseRedirect(error_url)
             
             # Verify state (optional but recommended)
             session_state = request.session.get('oauth_state')
             if session_state and session_state != state:
-                return Response({
-                    'error': 'Invalid state parameter'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                error_params = {
+                    'error': 'oauth_failed',
+                    'message': 'Invalid state parameter. Please try again.'
+                }
+                error_url = f"https://fe-recoil.vercel.app/login?{urlencode(error_params)}"
+                return HttpResponseRedirect(error_url)
             
             # Exchange code for token
             flow = Flow.from_client_config(
@@ -360,48 +379,52 @@ class GoogleOAuthCallbackAPIView(APIView):
                     member.email_verified = True  # Google emails are pre-verified
                     member.is_active = True
                     member.save()
+                
+                # Generate JWT tokens for existing user
+                tokens = generate_tokens_for_user(member)
+                
+                # Clean up session
+                if 'oauth_state' in request.session:
+                    del request.session['oauth_state']
+                
+                # Redirect to frontend with success and tokens
+                login_params = {
+                    'oauth_success': 'true',
+                    'access_token': tokens['access'],
+                    'refresh_token': tokens['refresh'],
+                    'user_id': member.id,
+                    'is_agent': 'true' if hasattr(member, 'agent') else 'false'
+                }
+                success_url = f"https://fe-recoil.vercel.app/login?{urlencode(login_params)}"
+                return HttpResponseRedirect(success_url)
+                
             except Member.DoesNotExist:
-                # Create new user
-                username = email.split('@')[0]  # Use email prefix as username
-                counter = 1
-                original_username = username
+                # User doesn't exist - redirect to frontend register page
+                register_params = {
+                    'email': email,
+                    'name': name,
+                    'google_id': google_id,
+                    'profile_picture': picture,
+                    'oauth': 'true'
+                }
                 
-                # Ensure unique username
-                while Member.objects.filter(username=username).exists():
-                    username = f"{original_username}{counter}"
-                    counter += 1
+                register_url = f"https://fe-recoil.vercel.app/register?{urlencode(register_params)}"
                 
-                member = Member(
-                    email=email,
-                    username=username,
-                    google_id=google_id,
-                    profile_picture=picture,
-                    is_oauth_user=True,
-                    email_verified=True,
-                    is_active=True
-                )
-                # Set unusable password for OAuth users
-                member.set_unusable_password()
-                member.save()
-            
-            # Generate JWT tokens
-            tokens = generate_tokens_for_user(member)
-            
-            # Clean up session
-            if 'oauth_state' in request.session:
-                del request.session['oauth_state']
-            
-            return Response({
-                'message': f'Welcome {name}! Successfully logged in with Google.',
-                'tokens': tokens,
-                'user': MemberSerializer(member).data,
-                'is_agent': hasattr(member, 'agent')
-            }, status=status.HTTP_200_OK)
+                # Clean up session
+                if 'oauth_state' in request.session:
+                    del request.session['oauth_state']
+                
+                return HttpResponseRedirect(register_url)
             
         except Exception as e:
-            return Response({
-                'error': f'OAuth authentication failed: {str(e)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            logger.error(f"OAuth callback error: {str(e)}")
+            # Redirect to frontend with error
+            error_params = {
+                'error': 'oauth_failed',
+                'message': f'OAuth authentication failed: {str(e)}'
+            }
+            error_url = f"https://fe-recoil.vercel.app/login?{urlencode(error_params)}"
+            return HttpResponseRedirect(error_url)
     
     def post(self, request):
         try:
@@ -462,43 +485,33 @@ class GoogleOAuthCallbackAPIView(APIView):
                     member.email_verified = True  # Google emails are pre-verified
                     member.is_active = True
                     member.save()
+                
+                # Generate JWT tokens for existing user
+                tokens = generate_tokens_for_user(member)
+                
+                # Clean up session
+                if 'oauth_state' in request.session:
+                    del request.session['oauth_state']
+                
+                return Response({
+                    'message': f'Welcome {name}! Successfully logged in with Google.',
+                    'tokens': tokens,
+                    'user': MemberSerializer(member).data,
+                    'is_agent': hasattr(member, 'agent')
+                }, status=status.HTTP_200_OK)
+                
             except Member.DoesNotExist:
-                # Create new user
-                username = email.split('@')[0]  # Use email prefix as username
-                counter = 1
-                original_username = username
-                
-                # Ensure unique username
-                while Member.objects.filter(username=username).exists():
-                    username = f"{original_username}{counter}"
-                    counter += 1
-                
-                member = Member(
-                    email=email,
-                    username=username,
-                    google_id=google_id,
-                    profile_picture=picture,
-                    is_oauth_user=True,
-                    email_verified=True,
-                    is_active=True
-                )
-                # Set unusable password for OAuth users
-                member.set_unusable_password()
-                member.save()
-            
-            # Generate JWT tokens
-            tokens = generate_tokens_for_user(member)
-            
-            # Clean up session
-            if 'oauth_state' in request.session:
-                del request.session['oauth_state']
-            
-            return Response({
-                'message': f'Welcome {name}! Successfully logged in with Google.',
-                'tokens': tokens,
-                'user': MemberSerializer(member).data,
-                'is_agent': hasattr(member, 'agent')
-            }, status=status.HTTP_200_OK)
+                # User doesn't exist - return data for frontend to handle registration
+                return Response({
+                    'redirect_to_register': True,
+                    'google_user_data': {
+                        'email': email,
+                        'name': name,
+                        'google_id': google_id,
+                        'profile_picture': picture
+                    },
+                    'register_url': 'https://fe-recoil.vercel.app/register'
+                }, status=status.HTTP_200_OK)
             
         except Exception as e:
             return Response({
