@@ -11,8 +11,33 @@ class MemberAdmin(admin.ModelAdmin):
         "points",
         "wallet",
         "alamat",
+        "latitude",
+        "longitude",
+        "gender",
         "email_verified",
         "is_oauth_user",
+        "profile_picture",
+    )
+    
+    list_filter = (
+        "gender",
+        "email_verified",
+        "is_oauth_user",
+        "is_active",
+    )
+    
+    search_fields = (
+        "email",
+        "username",
+        "phone_number",
+    )
+    
+    readonly_fields = (
+        "latitude",
+        "longitude",
+        "address_id",
+        "verification_token",
+        "google_id",
     )
 
 @admin.register(Waste)

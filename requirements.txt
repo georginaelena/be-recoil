@@ -14,3 +14,9 @@ djangorestframework-simplejwt
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
+googlemaps
+django-storages
+Boto3
+Pillow
+openai
+python-dotenv

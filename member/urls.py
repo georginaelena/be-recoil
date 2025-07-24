@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .location_views import nearest_members
 from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
@@ -19,6 +20,9 @@ urlpatterns = [
     # OAuth URLs
     path('api/oauth/google/', views.GoogleOAuthLoginAPIView.as_view(), name='api_oauth_google'),
     path('api/oauth/google/callback/', views.GoogleOAuthCallbackAPIView.as_view(), name='api_oauth_google_callback'),
+    
+    # Location-based URLs
+    path('api/nearest-members/', nearest_members, name='nearest_members'),
     
     # JWT token endpoints
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

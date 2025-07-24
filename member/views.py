@@ -12,7 +12,7 @@ from django.urls import reverse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from .serializers import MemberSerializer, MemberRegistrationSerializer, LoginSerializer
@@ -22,6 +22,12 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from google_auth_oauthlib.flow import Flow
 import json
+import googlemaps
+import logging
+logger = logging.getLogger(__name__)
+
+from math import radians, cos, sin, asin, sqrt
+from rest_framework.decorators import api_view, permission_classes
 
 # Create your views here.
 
@@ -99,12 +105,35 @@ class RegisterAPIView(APIView):
     
     def post(self, request):
         serializer = MemberRegistrationSerializer(data=request.data)
+        print("tes")
         if serializer.is_valid():
+            print("tesser")
+
             user = serializer.save()
             
-            # Automatically activate user (no email verification needed)
-            user.is_active = True
-            user.email_verified = True
+            # Set default profile picture based on gender
+            gender = request.data.get('gender', 'Men')
+            if not user.profile_picture:
+                if gender == 'Women':
+                    user.profile_picture = 'https://hacks-recoil.s3.amazonaws.com/photos/female.svg'
+                else:
+                    user.profile_picture = 'https://hacks-recoil.s3.amazonaws.com/photos/male.svg'
+
+            # Geocode address if present
+            if user.alamat:
+                try:
+                    gmaps = googlemaps.Client(key=settings.GOOGLE_API_KEY)
+                    geocode_result = gmaps.geocode(user.alamat)
+                    logger.debug(f"Geocode result for '{user.alamat}': {geocode_result}")
+                    if geocode_result:
+                        location = geocode_result[0]['geometry']['location']
+                        user.latitude = location['lat']
+                        user.longitude = location['lng']
+                        user.address_id = geocode_result[0]['place_id']
+                except Exception as e:
+                    # Log error but don't fail registration
+                    logger.error(f"Geocoding failed: {str(e)}")
+
             user.save()
             
             # Check if user was registered as an agent
@@ -176,8 +205,34 @@ class ProfileAPIView(APIView):
         return Response(serializer.data)
     
     def put(self, request):
-        serializer = MemberSerializer(request.user, data=request.data, partial=True)
+        user = request.user
+        serializer = MemberSerializer(user, data=request.data, partial=True)
         if serializer.is_valid():
+            # Check if address is being updated
+            if 'alamat' in request.data and request.data['alamat'] != user.alamat:
+                try:
+                    gmaps = googlemaps.Client(key=settings.GOOGLE_API_KEY)
+                    geocode_result = gmaps.geocode(request.data['alamat'])
+                    if geocode_result:
+                        location = geocode_result[0]['geometry']['location']
+                        serializer.validated_data['latitude'] = location['lat']
+                        serializer.validated_data['longitude'] = location['lng']
+                        serializer.validated_data['address_id'] = geocode_result[0]['place_id']
+                    else:
+                        # Handle case where address is not found
+                        return Response({'error': 'Address could not be geocoded.'}, status=status.HTTP_400_BAD_REQUEST)
+                except Exception as e:
+                    # Log error but continue with update
+                    logger.error(f"Geocoding failed during profile update: {str(e)}")
+
+            # Set default profile picture if not provided and gender is updated
+            gender = request.data.get('gender', user.gender)
+            if not user.profile_picture or 'gender' in request.data:
+                if gender == 'Women':
+                    serializer.validated_data['profile_picture'] = 'https://hacks-recoil.s3.amazonaws.com/photos/female.svg'
+                else:
+                    serializer.validated_data['profile_picture'] = 'https://hacks-recoil.s3.amazonaws.com/photos/male.svg'
+
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

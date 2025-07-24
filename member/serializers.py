@@ -9,9 +9,11 @@ class MemberSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Member
-        fields = ['id', 'email', 'username', 'phone_number', 'points', 'wallet', 
-                 'alamat', 'email_verified', 'profile_picture', 'is_oauth_user', 'is_agent']
-        read_only_fields = ['id', 'points', 'wallet', 'email_verified', 'is_agent']
+        fields = ('id', 'username', 'email', 'phone_number', 'points', 'wallet', 'alamat', 
+                  'profile_picture', 'is_oauth_user', 'latitude', 'longitude', 'address_id', 
+                  'gender', 'is_agent', 'email_verified')
+        read_only_fields = ('id', 'email', 'points', 'wallet', 'is_oauth_user', 
+                            'latitude', 'longitude', 'address_id', 'is_agent', 'email_verified')
     
     def get_is_agent(self, obj):
         """Check if user has an agent profile"""
@@ -26,7 +28,7 @@ class MemberRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Member
         fields = ['email', 'username', 'password', 'password_confirm', 
-                 'phone_number', 'alamat', 'is_agent']
+                 'phone_number', 'alamat', 'is_agent', 'gender']
     
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
@@ -40,7 +42,8 @@ class MemberRegistrationSerializer(serializers.ModelSerializer):
         
         user = Member(**validated_data)
         user.set_password(password)
-        user.is_active = False  # Perlu email verification
+        user.is_active = True  # Auto activate (no email verification)
+        user.email_verified = True  # Auto verify email
         user.save()
         
         # If is_agent is True, create an Agent instance
@@ -66,8 +69,6 @@ class LoginSerializer(serializers.Serializer):
                 raise serializers.ValidationError('Invalid credentials')
             if not user.is_active:
                 raise serializers.ValidationError('Account is not active')
-            if not user.email_verified:
-                raise serializers.ValidationError('Please verify your email first')
             attrs['user'] = user
             return attrs
         else:

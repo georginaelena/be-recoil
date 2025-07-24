@@ -5,10 +5,19 @@ class Member(AbstractUser):
     email = models.EmailField(unique=True)
     phone_number = models.CharField(max_length=20, unique=True, blank=True, null=True)
     points = models.IntegerField(default=0)
-    wallet = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    wallet = models.DecimalField(max_digits=12, decimal_places=2, default=100000.00)
     alamat = models.TextField(blank=True, null=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
     email_verified = models.BooleanField(default=False)
     verification_token = models.CharField(max_length=64, blank=True, null=True)
+    address_id = models.CharField(max_length=255, blank=True, null=True)
+    
+    GENDER_CHOICES = [
+        ('Men', 'Men'),
+        ('Women', 'Women'),
+    ]
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, default='Men')
 
     #OAuth
     google_id = models.CharField(max_length=100, blank=True, null=True, unique=True)
