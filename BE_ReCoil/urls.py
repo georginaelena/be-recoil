@@ -24,4 +24,5 @@ urlpatterns = [
     path('agent/', include('agent.urls')),
     path('chatbot/', include('chatbot.urls')),
     path('item/', include('item.urls')),
+    path('community/', include('community.urls')),
 ]
