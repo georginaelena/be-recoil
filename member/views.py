@@ -132,11 +132,24 @@ class LoginAPIView(APIView):
         if serializer.is_valid():
             user = serializer.validated_data['user']
             tokens = generate_tokens_for_user(user)
-            return Response({
+            
+            # Check if user is an agent
+            is_agent = hasattr(user, 'agent')
+            
+            response_data = {
                 'message': 'Login successful',
                 'tokens': tokens,
-                'user': MemberSerializer(user).data
-            }, status=status.HTTP_200_OK)
+                'user': MemberSerializer(user).data,
+                'is_agent': is_agent
+            }
+            
+            # Add agent details if user is an agent
+            if is_agent:
+                response_data['agent'] = {
+                    'id': user.agent.id,
+                }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class LogoutAPIView(APIView):
@@ -326,7 +339,8 @@ class GoogleOAuthCallbackAPIView(APIView):
             return Response({
                 'message': f'Welcome {name}! Successfully logged in with Google.',
                 'tokens': tokens,
-                'user': MemberSerializer(member).data
+                'user': MemberSerializer(member).data,
+                'is_agent': hasattr(member, 'agent')
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
@@ -427,7 +441,8 @@ class GoogleOAuthCallbackAPIView(APIView):
             return Response({
                 'message': f'Welcome {name}! Successfully logged in with Google.',
                 'tokens': tokens,
-                'user': MemberSerializer(member).data
+                'user': MemberSerializer(member).data,
+                'is_agent': hasattr(member, 'agent')
             }, status=status.HTTP_200_OK)
             
         except Exception as e:

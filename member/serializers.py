@@ -5,11 +5,17 @@ from agent.models import Agent
 
 class MemberSerializer(serializers.ModelSerializer):
     """Serializer untuk Member model"""
+    is_agent = serializers.SerializerMethodField()
+    
     class Meta:
         model = Member
         fields = ['id', 'email', 'username', 'phone_number', 'points', 'wallet', 
-                 'alamat', 'email_verified', 'profile_picture', 'is_oauth_user']
-        read_only_fields = ['id', 'points', 'wallet', 'email_verified']
+                 'alamat', 'email_verified', 'profile_picture', 'is_oauth_user', 'is_agent']
+        read_only_fields = ['id', 'points', 'wallet', 'email_verified', 'is_agent']
+    
+    def get_is_agent(self, obj):
+        """Check if user has an agent profile"""
+        return hasattr(obj, 'agent')
 
 class MemberRegistrationSerializer(serializers.ModelSerializer):
     """Serializer untuk registrasi member baru"""
