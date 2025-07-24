@@ -16,6 +16,7 @@ chatbot_instances = {}
 @permission_classes([IsAuthenticated])
 @csrf_exempt
 def chat_with_ai(request):
+    #test
     """Chat with AI assistant about waste management and recycling"""
     user = request.user
     user_id = user.id
