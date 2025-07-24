@@ -54,6 +54,8 @@ INSTALLED_APPS = [
     'main',
     'agent',
     'member',
+    # 'chatbot',
+    'item',
 ]
 
 AUTH_USER_MODEL = 'member.Member'
