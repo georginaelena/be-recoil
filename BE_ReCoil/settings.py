@@ -96,12 +96,36 @@ WSGI_APPLICATION = 'BE_ReCoil.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+if os.getenv('KOYEB_DEPLOYMENT'):
+    # Production database on Koyeb persistent disk
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': '/data/db.sqlite3',  # Koyeb persistent disk path
+        }
     }
-}
+    
+    # Static files for production
+    STATIC_ROOT = '/data/static/'
+    MEDIA_ROOT = '/data/media/'
+    
+    # Set DEBUG to False in production
+    DEBUG = False
+else:
+    # Development database (your existing setup)
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.sqlite3',
+#         'NAME': BASE_DIR / 'db.sqlite3',
+#     }
+# }
 
 
 # Password validation

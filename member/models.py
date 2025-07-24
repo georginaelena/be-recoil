@@ -14,7 +14,7 @@ class Member(AbstractUser):
     address_id = models.CharField(max_length=255, blank=True, null=True)
     
     GENDER_CHOICES = [
-        ('Men', 'Men'),
+        ('Men', 'Men'), 
         ('Women', 'Women'),
     ]
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES, default='Men')
