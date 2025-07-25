@@ -40,6 +40,14 @@ def item_detail(request, item_id):
             "image_url": item.image.url if item.image else None,
         }
         
+        # Add owner information
+        if item.agent:
+            response["agent_id"] = item.agent.id
+            response["owner_name"] = item.agent.user.username
+        elif item.member:
+            response["member_id"] = item.member.id
+            response["owner_name"] = item.member.username
+        
         return JsonResponse(response)
     
     except Item.DoesNotExist:
@@ -183,7 +191,7 @@ def my_items(request):
     
     items_list = []
     for item in items:
-        items_list.append({
+        item_data = {
             "id": item.id,
             "name": item.name,
             "description": item.description,
@@ -193,7 +201,15 @@ def my_items(request):
             "unit": item.unit,
             "created_at": item.created_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(item, 'created_at') else None,
             "image_url": item.image.url if item.image else None,
-        })
+        }
+        
+        # Add owner information
+        if item.agent:
+            item_data["agent_id"] = item.agent.id
+        elif item.member:
+            item_data["member_id"] = item.member.id
+            
+        items_list.append(item_data)
     
     return JsonResponse({
         "status": "success",
