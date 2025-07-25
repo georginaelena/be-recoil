@@ -5,7 +5,7 @@ from django.contrib.auth.decorators import login_required
 from member.models import Member, Waste
 from agent.models import Agent
 from item.models import Item
-from .models import Cart, CartItem, Transaction, Offer, Message
+from .models import Cart, CartItem, Transaction, Offer, NegotiationSession, ChatMessage
 from django.db import transaction as db_transaction
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes
@@ -381,341 +381,506 @@ def complete_transaction(request, transaction_id):
 
 # ================ OFFERS AND MESSAGE MANAGEMENT ================
 
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def list_sessions(request):
+    user     = request.user
+    is_agent = hasattr(user, 'agent')
+
+    qs = NegotiationSession.objects.filter(
+        agent=user.agent if is_agent else None,
+        member=user      if not is_agent else None
+    )
+    data = []
+    for s in qs:
+        last    = s.offers.order_by('-created_at').first()
+        unread  = s.messages.filter(
+            sender_is_agent=not is_agent
+        ).count()
+        data.append({
+            'session_id':  s.id,
+            'item_name':   s.item.name,
+            'last_offer':  float(last.price) if last else None,
+            'status':      last.status  if last else None,
+            'unread':      unread
+        })
+    return JsonResponse({'sessions': data})
+
+
+@api_view(['GET','POST'])
+@permission_classes([IsAuthenticated])
+def session_detail(request, session_id):
+    session = get_object_or_404(NegotiationSession, id=session_id)
+    user    = request.user
+    is_agent= hasattr(user, 'agent')
+
+    if request.method == 'POST':
+        action = request.data.get('action')
+
+        if action == 'offer':
+            # Check if this is the first offer - only agents can make first offers
+            existing_offers = session.offers.exists()
+            if not existing_offers and not is_agent:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Only agents can make the first offer'
+                }, status=403)
+            
+            offer = Offer.objects.create(
+                session         = session,
+                price           = request.data['price'],
+                quantity        = session.item.stock,
+                sender_is_agent = is_agent
+            )
+            return JsonResponse({'status':'success','offer_id':offer.id})
+
+        if action == 'message':
+            # block until an offer is accepted
+            if not session.offers.filter(status='accepted').exists():
+                return JsonResponse({
+                    'status':'error',
+                    'message':'Chat locked until offer is accepted'
+                }, status=400)
+
+            msg = ChatMessage.objects.create(
+                session         = session,
+                sender_is_agent = is_agent,
+                content         = request.data['content']
+            )
+            return JsonResponse({'status':'success','message_id':msg.id})
+
+        return JsonResponse({
+            'status':'error',
+            'message':'Invalid action'
+        }, status=400)
+
+    # GET: build timeline
+    events = []
+    for o in session.offers.order_by('created_at'):
+        events.append({
+            'type':            'offer',
+            'price':           float(o.price),
+            'status':          o.status,
+            'sender_is_agent': o.sender_is_agent,
+            'created_at':      o.created_at.isoformat()
+        })
+    for m in session.messages.order_by('created_at'):
+        events.append({
+            'type':            'message',
+            'content':         m.content,
+            'sender_is_agent': m.sender_is_agent,
+            'created_at':      m.created_at.isoformat()
+        })
+    events.sort(key=lambda e: e['created_at'])
+
+    return JsonResponse({'session':session_id,'events':events})
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @csrf_exempt
-def create_offer(request):
-    """Create an offer for an item (agent only)"""
+def create_or_get_session(request):
+    """Create or get existing negotiation session between user and target for a specific item"""
     user = request.user
+    is_agent = hasattr(user, 'agent')
     
-    # Only agents can create offers
-    if not hasattr(user, 'agent'):
-        return JsonResponse({"status": "error", "message": "Only agents can make offers"}, status=403)
-    
-    agent = user.agent
     item_id = request.data.get('item_id')
-    price = request.data.get('price')
-    message = request.data.get('message', '')
-    
-    if not item_id or not price:
-        return JsonResponse({"status": "error", "message": "item_id and price are required"}, status=400)
+    if not item_id:
+        return JsonResponse({"status": "error", "message": "item_id is required"}, status=400)
     
     try:
-        item = Item.objects.get(id=item_id, member__isnull=False)
+        item = Item.objects.get(id=item_id)
     except Item.DoesNotExist:
         return JsonResponse({"status": "error", "message": "Item not found"}, status=404)
     
-    # Use the item's quantity from member's listing
-    quantity = item.stock
-    
-    # Create the offer
-    offer = Offer.objects.create(
-        member=item.member,
-        agent=agent,
-        item=item,
-        quantity=quantity,
-        price=float(price),
-        message=message,
-        sender_is_agent=True  # Initial offers are always from agents
-    )
-    
-    return JsonResponse({
-        "status": "success",
-        "message": "Offer created successfully",
-        "offer_id": offer.id
-    })
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-@csrf_exempt
-def respond_to_offer(request, offer_id):
-    """Accept, reject, or counter an offer"""
-    user = request.user
-    is_agent = hasattr(user, 'agent')
-    
-    action = request.data.get('action')
-    if action not in ['accept', 'reject', 'counter']:
-        return JsonResponse({"status": "error", "message": "Invalid action"}, status=400)
-    
-    try:
-        if is_agent:
-            offer = Offer.objects.get(id=offer_id, agent=user.agent)
-        else:
-            offer = Offer.objects.get(id=offer_id, member=user)
-    except Offer.DoesNotExist:
-        return JsonResponse({"status": "error", "message": "Offer not found"}, status=404)
-    
-    # Check if user is allowed to respond (can't respond to your own offer)
-    if (is_agent and offer.sender_is_agent) or (not is_agent and not offer.sender_is_agent):
-        return JsonResponse({"status": "error", "message": "You cannot respond to your own offer"}, status=403)
-    
-    if action == 'counter':
-        # Handle counter-offer
-        new_price = request.data.get('price')
-        message = request.data.get('message', '')
+    if is_agent:
+        # Agent wants to negotiate with the item owner (member)
+        if not item.member:
+            return JsonResponse({"status": "error", "message": "Item has no owner"}, status=400)
         
-        if not new_price:
-            return JsonResponse({"status": "error", "message": "Price is required for counter-offer"}, status=400)
-        
-        # Update current offer status
-        offer.status = 'countered'
-        offer.save()
-        
-        # Create new counter-offer
-        counter = Offer.objects.create(
-            member=offer.member,
-            agent=offer.agent,
-            item=offer.item,
-            quantity=offer.quantity,  # Same quantity
-            price=float(new_price),
-            message=message,
-            sender_is_agent=is_agent,  # Who created the counter
-            parent_offer=offer
+        session, created = NegotiationSession.objects.get_or_create(
+            agent=user.agent,
+            member=item.member,
+            item=item
         )
         
-        return JsonResponse({
-            "status": "success",
-            "message": "Counter-offer created",
-            "offer_id": counter.id
-        })
-        
-    else:  # accept or reject
-        offer.status = f"{action}ed"  # accepted or rejected
-        offer.save()
-        
-        if action == 'accept':
-            # Check wallet balance before creating transaction
-            if offer.agent.user.wallet < offer.price:
-                return JsonResponse({
-                    "status": "error",
-                    "message": f"Insufficient wallet balance. Required: {offer.price}, Available: {offer.agent.user.wallet}"
-                }, status=400)
-            
-            # Update wallet balances
-            offer.agent.user.wallet -= offer.price
-            offer.member.wallet += offer.price
-            offer.agent.user.save()
-            offer.member.save()
-            
-            # Create transaction record
-            Transaction.objects.create(
-                member=offer.member,
-                agent=offer.agent,
-                item=offer.item,  # Now using item directly
-                transaction_type='sell',  # Member selling to agent
-                quantity=int(offer.quantity),  # Converting to int for PositiveIntegerField
-                total_price=offer.price
-            )
-            
-            # Update item status to sold
-            item = offer.item
-            item.status = 'sold'
-            item.save()
-        
-        return JsonResponse({
-            "status": "success",
-            "message": f"Offer {action}ed successfully"
-        })
-    
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-@csrf_exempt
-def get_latest_accepted_offer(request, agent_id=None, member_id=None):
-    """Get the latest accepted offer between a member and an agent"""
-    user = request.user
-    is_agent = hasattr(user, 'agent')
-    
-    # Determine which party we're looking for based on the current user
-    if is_agent:
-        # Agent is looking for offers with a specific member
-        if not member_id:
-            return JsonResponse({"status": "error", "message": "member_id is required"}, status=400)
-        
-        try:
-            member = Member.objects.get(id=member_id)
-            agent = user.agent
-        except Member.DoesNotExist:
-            return JsonResponse({"status": "error", "message": "Member not found"}, status=404)
-            
+        other_party = {
+            "type": "member",
+            "id": item.member.id,
+            "name": item.member.username,
+            "email": item.member.email
+        }
     else:
-        # Member is looking for offers with a specific agent
+        # Member wants to negotiate - need to specify which agent
+        agent_id = request.data.get('agent_id')
         if not agent_id:
-            return JsonResponse({"status": "error", "message": "agent_id is required"}, status=400)
+            return JsonResponse({"status": "error", "message": "agent_id is required for members"}, status=400)
         
         try:
             agent = Agent.objects.get(id=agent_id)
-            member = user
         except Agent.DoesNotExist:
             return JsonResponse({"status": "error", "message": "Agent not found"}, status=404)
-    
-    # Find the latest accepted offer
-    latest_offer = Offer.objects.filter(
-        member=member,
-        agent=agent,
-        status='accepted'
-    ).order_by('-created_at').first()
-    
-    if not latest_offer:
-        return JsonResponse({
-            "status": "error", 
-            "message": "No accepted offers found between these parties"
-        }, status=404)
-    
-    # Return the offer ID and basic info
-    return JsonResponse({
-        "status": "success",
-        "offer": {
-            "id": latest_offer.id,
-            "item_name": latest_offer.item.name,
-            "price": float(latest_offer.price),
-            "created_at": latest_offer.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-            "message_count": latest_offer.messages.count()
+        
+        session, created = NegotiationSession.objects.get_or_create(
+            agent=agent,
+            member=user,
+            item=item
+        )
+        
+        other_party = {
+            "type": "agent",
+            "id": agent.id,
+            "name": agent.user.username,
+            "email": agent.user.email
         }
-    })
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-@csrf_exempt
-def send_message(request, offer_id):
-    """Send a message for an offer"""
-    user = request.user
-    is_agent = hasattr(user, 'agent')
-    
-    try:
-        if is_agent:
-            offer = Offer.objects.get(id=offer_id, agent=user.agent)
-        else:
-            offer = Offer.objects.get(id=offer_id, member=user)
-    except Offer.DoesNotExist:
-        return JsonResponse({"status": "error", "message": "Offer not found"}, status=404)
-    
-    # Only allow messages on accepted offers
-    if offer.status != 'accepted':
-        return JsonResponse({"status": "error", "message": "Messages are only allowed for accepted offers"}, status=400)
-    
-    content = request.data.get('content')
-    if not content:
-        return JsonResponse({"status": "error", "message": "Message content is required"}, status=400)
-    
-    # Create the message
-    message = Message.objects.create(
-        offer=offer,
-        sender_is_agent=is_agent,
-        content=content
-    )
     
     return JsonResponse({
         "status": "success",
-        "message_id": message.id,
-        "content": content,
-        "created_at": message.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        "session_id": session.id,
+        "created": created,
+        "item": {
+            "id": item.id,
+            "name": item.name,
+            "price": float(item.price)
+        },
+        "other_party": other_party
     })
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-@csrf_exempt
-def get_offer_with_messages(request, offer_id):
-    """Get both offer details and messages in a single API call"""
-    user = request.user
-    is_agent = hasattr(user, 'agent')
+# @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+# @csrf_exempt
+# def create_offer(request):
+#     """Create an offer for an item (agent only)"""
+#     user = request.user
     
-    try:
-        # Security check to ensure user is either the member or agent involved
-        if is_agent:
-            offer = Offer.objects.get(id=offer_id, agent=user.agent)
-        else:
-            offer = Offer.objects.get(id=offer_id, member=user)
+#     # Only agents can create offers
+#     if not hasattr(user, 'agent'):
+#         return JsonResponse({"status": "error", "message": "Only agents can make offers"}, status=403)
+    
+#     agent = user.agent
+#     item_id = request.data.get('item_id')
+#     price = request.data.get('price')
+#     message = request.data.get('message', '')
+    
+#     if not item_id or not price:
+#         return JsonResponse({"status": "error", "message": "item_id and price are required"}, status=400)
+    
+#     try:
+#         item = Item.objects.get(id=item_id, member__isnull=False)
+#     except Item.DoesNotExist:
+#         return JsonResponse({"status": "error", "message": "Item not found"}, status=404)
+    
+#     # Use the item's quantity from member's listing
+#     quantity = item.stock
+    
+#     # Create the offer
+#     offer = Offer.objects.create(
+#         member=item.member,
+#         agent=agent,
+#         item=item,
+#         quantity=quantity,
+#         price=float(price),
+#         message=message,
+#         sender_is_agent=True  # Initial offers are always from agents
+#     )
+    
+#     return JsonResponse({
+#         "status": "success",
+#         "message": "Offer created successfully",
+#         "offer_id": offer.id
+#     })
+
+# @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+# @csrf_exempt
+# def respond_to_offer(request, offer_id):
+#     """Accept, reject, or counter an offer"""
+#     user = request.user
+#     is_agent = hasattr(user, 'agent')
+    
+#     action = request.data.get('action')
+#     if action not in ['accept', 'reject', 'counter']:
+#         return JsonResponse({"status": "error", "message": "Invalid action"}, status=400)
+    
+#     try:
+#         if is_agent:
+#             offer = Offer.objects.get(id=offer_id, agent=user.agent)
+#         else:
+#             offer = Offer.objects.get(id=offer_id, member=user)
+#     except Offer.DoesNotExist:
+#         return JsonResponse({"status": "error", "message": "Offer not found"}, status=404)
+    
+#     # Check if user is allowed to respond (can't respond to your own offer)
+#     if (is_agent and offer.sender_is_agent) or (not is_agent and not offer.sender_is_agent):
+#         return JsonResponse({"status": "error", "message": "You cannot respond to your own offer"}, status=403)
+    
+#     if action == 'counter':
+#         # Handle counter-offer
+#         new_price = request.data.get('price')
+#         message = request.data.get('message', '')
+        
+#         if not new_price:
+#             return JsonResponse({"status": "error", "message": "Price is required for counter-offer"}, status=400)
+        
+#         # Update current offer status
+#         offer.status = 'countered'
+#         offer.save()
+        
+#         # Create new counter-offer
+#         counter = Offer.objects.create(
+#             member=offer.member,
+#             agent=offer.agent,
+#             item=offer.item,
+#             quantity=offer.quantity,  # Same quantity
+#             price=float(new_price),
+#             message=message,
+#             sender_is_agent=is_agent,  # Who created the counter
+#             parent_offer=offer
+#         )
+        
+#         return JsonResponse({
+#             "status": "success",
+#             "message": "Counter-offer created",
+#             "offer_id": counter.id
+#         })
+        
+#     else:  # accept or reject
+#         offer.status = f"{action}ed"  # accepted or rejected
+#         offer.save()
+        
+#         if action == 'accept':
+#             # Check wallet balance before creating transaction
+#             if offer.agent.user.wallet < offer.price:
+#                 return JsonResponse({
+#                     "status": "error",
+#                     "message": f"Insufficient wallet balance. Required: {offer.price}, Available: {offer.agent.user.wallet}"
+#                 }, status=400)
             
-    except Offer.DoesNotExist:
-        return JsonResponse({"status": "error", "message": "Offer not found or access denied"}, status=404)
-    
-    # Build negotiation history
-    history = []
-    current = offer
-    
-    # First, collect all parent offers going up the chain
-    parent_chain = []
-    while current.parent_offer:
-        parent_chain.append(current.parent_offer)
-        current = current.parent_offer
-    
-    # Sort history chronologically (oldest to newest)
-    for parent in reversed(parent_chain):
-        history.append({
-            "id": parent.id,
-            "price": float(parent.price),
-            "message": parent.message,
-            "status": parent.status,
-            "sender_is_agent": parent.sender_is_agent,
-            "created_at": parent.created_at.strftime("%Y-%m-%d %H:%M:%S")
-        })
-    
-    # Add the current offer to the history
-    history.append({
-        "id": offer.id,
-        "price": float(offer.price),
-        "message": offer.message,
-        "status": offer.status,
-        "sender_is_agent": offer.sender_is_agent,
-        "created_at": offer.created_at.strftime("%Y-%m-%d %H:%M:%S")
-    })
-    
-    item_info = {
-        "id": offer.item.id,
-        "name": offer.item.name,
-        "category": offer.item.category,
-        "quantity": float(offer.quantity),
-        "description": offer.item.description,
-        "location": offer.item.location or "",
-        "price": float(offer.item.price)
-    }
-    
-    if is_agent:
-        user_info = {
-            "member": {
-                "id": offer.member.id,
-                "username": offer.member.username,
-                "email": offer.member.email
-            }
-        }
-    else:
-        user_info = {
-            "agent": {
-                "id": offer.agent.id,
-                "name": offer.agent.user.username,
-                "email": offer.agent.user.email
-            }
-        }
-    
-    result = {
-        "id": offer.id,
-        "item": item_info,
-        "price": float(offer.price),
-        "status": offer.status,
-        "negotiation_history": history,
-        "can_message": offer.status == 'accepted',
-        **user_info
-    }
-    
-    # If offer is accepted, include messages
-    if offer.status == 'accepted': 
-        # Get all messages
-        messages = Message.objects.filter(offer=offer).order_by('created_at')
+#             # Update wallet balances
+#             offer.agent.user.wallet -= offer.price
+#             offer.member.wallet += offer.price
+#             offer.agent.user.save()
+#             offer.member.save()
+            
+#             # Create transaction record
+#             Transaction.objects.create(
+#                 member=offer.member,
+#                 agent=offer.agent,
+#                 item=offer.item,  # Now using item directly
+#                 transaction_type='sell',  # Member selling to agent
+#                 quantity=int(offer.quantity),  # Converting to int for PositiveIntegerField
+#                 total_price=offer.price
+#             )
+            
+#             # Update item status to sold
+#             item = offer.item
+#             item.status = 'sold'
+#             item.save()
         
-        chat_messages = []
-        for message in messages:
-            sender = offer.agent.user.username if message.sender_is_agent else offer.member.username
-            chat_messages.append({
-                "id": message.id,
-                "content": message.content,
-                "sender": sender,
-                "sender_type": "agent" if message.sender_is_agent else "member",
-                "created_at": message.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-            })
-        
-        result["messages"] = chat_messages
+#         return JsonResponse({
+#             "status": "success",
+#             "message": f"Offer {action}ed successfully"
+#         })
     
-    return JsonResponse({
-        "status": "success",
-        "offer": result
-    })
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# @csrf_exempt
+# def get_latest_accepted_offer(request, agent_id=None, member_id=None):
+#     """Get the latest accepted offer between a member and an agent"""
+#     user = request.user
+#     is_agent = hasattr(user, 'agent')
+    
+#     # Determine which party we're looking for based on the current user
+#     if is_agent:
+#         # Agent is looking for offers with a specific member
+#         if not member_id:
+#             return JsonResponse({"status": "error", "message": "member_id is required"}, status=400)
+        
+#         try:
+#             member = Member.objects.get(id=member_id)
+#             agent = user.agent
+#         except Member.DoesNotExist:
+#             return JsonResponse({"status": "error", "message": "Member not found"}, status=404)
+            
+#     else:
+#         # Member is looking for offers with a specific agent
+#         if not agent_id:
+#             return JsonResponse({"status": "error", "message": "agent_id is required"}, status=400)
+        
+#         try:
+#             agent = Agent.objects.get(id=agent_id)
+#             member = user
+#         except Agent.DoesNotExist:
+#             return JsonResponse({"status": "error", "message": "Agent not found"}, status=404)
+    
+#     # Find the latest accepted offer
+#     latest_offer = Offer.objects.filter(
+#         member=member,
+#         agent=agent,
+#         status='accepted'
+#     ).order_by('-created_at').first()
+    
+#     if not latest_offer:
+#         return JsonResponse({
+#             "status": "error", 
+#             "message": "No accepted offers found between these parties"
+#         }, status=404)
+    
+#     # Return the offer ID and basic info
+#     return JsonResponse({
+#         "status": "success",
+#         "offer": {
+#             "id": latest_offer.id,
+#             "item_name": latest_offer.item.name,
+#             "price": float(latest_offer.price),
+#             "created_at": latest_offer.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+#             "message_count": latest_offer.messages.count()
+#         }
+#     })
+
+# @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+# @csrf_exempt
+# def send_message(request, offer_id):
+#     """Send a message for an offer"""
+#     user = request.user
+#     is_agent = hasattr(user, 'agent')
+    
+#     try:
+#         if is_agent:
+#             offer = Offer.objects.get(id=offer_id, agent=user.agent)
+#         else:
+#             offer = Offer.objects.get(id=offer_id, member=user)
+#     except Offer.DoesNotExist:
+#         return JsonResponse({"status": "error", "message": "Offer not found"}, status=404)
+    
+#     # Only allow messages on accepted offers
+#     if offer.status != 'accepted':
+#         return JsonResponse({"status": "error", "message": "Messages are only allowed for accepted offers"}, status=400)
+    
+#     content = request.data.get('content')
+#     if not content:
+#         return JsonResponse({"status": "error", "message": "Message content is required"}, status=400)
+    
+#     # Create the message
+#     message = Message.objects.create(
+#         offer=offer,
+#         sender_is_agent=is_agent,
+#         content=content
+#     )
+    
+#     return JsonResponse({
+#         "status": "success",
+#         "message_id": message.id,
+#         "content": content,
+#         "created_at": message.created_at.strftime("%Y-%m-%d %H:%M:%S")
+#     })
+
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# @csrf_exempt
+# def get_offer_with_messages(request, offer_id):
+#     """Get both offer details and messages in a single API call"""
+#     user = request.user
+#     is_agent = hasattr(user, 'agent')
+    
+#     try:
+#         # Security check to ensure user is either the member or agent involved
+#         if is_agent:
+#             offer = Offer.objects.get(id=offer_id, agent=user.agent)
+#         else:
+#             offer = Offer.objects.get(id=offer_id, member=user)
+            
+#     except Offer.DoesNotExist:
+#         return JsonResponse({"status": "error", "message": "Offer not found or access denied"}, status=404)
+    
+#     # Build negotiation history
+#     history = []
+#     current = offer
+    
+#     # First, collect all parent offers going up the chain
+#     parent_chain = []
+#     while current.parent_offer:
+#         parent_chain.append(current.parent_offer)
+#         current = current.parent_offer
+    
+#     # Sort history chronologically (oldest to newest)
+#     for parent in reversed(parent_chain):
+#         history.append({
+#             "id": parent.id,
+#             "price": float(parent.price),
+#             "message": parent.message,
+#             "status": parent.status,
+#             "sender_is_agent": parent.sender_is_agent,
+#             "created_at": parent.created_at.strftime("%Y-%m-%d %H:%M:%S")
+#         })
+    
+#     # Add the current offer to the history
+#     history.append({
+#         "id": offer.id,
+#         "price": float(offer.price),
+#         "message": offer.message,
+#         "status": offer.status,
+#         "sender_is_agent": offer.sender_is_agent,
+#         "created_at": offer.created_at.strftime("%Y-%m-%d %H:%M:%S")
+#     })
+    
+#     item_info = {
+#         "id": offer.item.id,
+#         "name": offer.item.name,
+#         "category": offer.item.category,
+#         "quantity": float(offer.quantity),
+#         "description": offer.item.description,
+#         "location": offer.item.location or "",
+#         "price": float(offer.item.price)
+#     }
+    
+#     if is_agent:
+#         user_info = {
+#             "member": {
+#                 "id": offer.member.id,
+#                 "username": offer.member.username,
+#                 "email": offer.member.email
+#             }
+#         }
+#     else:
+#         user_info = {
+#             "agent": {
+#                 "id": offer.agent.id,
+#                 "name": offer.agent.user.username,
+#                 "email": offer.agent.user.email
+#             }
+#         }
+    
+#     result = {
+#         "id": offer.id,
+#         "item": item_info,
+#         "price": float(offer.price),
+#         "status": offer.status,
+#         "negotiation_history": history,
+#         "can_message": offer.status == 'accepted',
+#         **user_info
+#     }
+    
+#     # If offer is accepted, include messages
+#     if offer.status == 'accepted': 
+#         # Get all messages
+#         messages = Message.objects.filter(offer=offer).order_by('created_at')
+        
+#         chat_messages = []
+#         for message in messages:
+#             sender = offer.agent.user.username if message.sender_is_agent else offer.member.username
+#             chat_messages.append({
+#                 "id": message.id,
+#                 "content": message.content,
+#                 "sender": sender,
+#                 "sender_type": "agent" if message.sender_is_agent else "member",
+#                 "created_at": message.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+#             })
+        
+#         result["messages"] = chat_messages
+    
+#     return JsonResponse({
+#         "status": "success",
+#         "offer": result
+#     })
