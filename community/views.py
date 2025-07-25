@@ -38,6 +38,25 @@ def get_all_blogs(request):
     return JsonResponse({'blogs': data})
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
+@csrf_exempt
+def get_blog_details(request, blog_id):
+    try:
+        blog = Blog.objects.get(id=blog_id)
+        data = {
+            'id': blog.id,
+            'username': blog.user.username,
+            'date_added': blog.date_added,
+            'title': blog.title,
+            'body': blog.body,
+            'thumbs_up_count': blog.thumbs_ups.count(),
+            'image_url': blog.image.url if blog.image else None,
+        }
+        return JsonResponse({'blog': data})
+    except Blog.DoesNotExist:
+        return JsonResponse({'error': 'Blog not found.'}, status=404)
+    
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 @csrf_exempt
 def get_my_blogs(request):
