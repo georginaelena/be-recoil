@@ -48,35 +48,85 @@ class Transaction(models.Model):
     def __str__(self):
         return f"{self.member.email} {self.transaction_type} {self.item} from {self.agent.user.email} - {self.status}"
 
-# Update Offer model to use Item instead of Waste
-class Offer(models.Model):
-    STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('accepted', 'Accepted'),
-        ('rejected', 'Rejected'),
-        ('countered', 'Countered'),
-    ]
-    
-    member = models.ForeignKey(Member, on_delete=models.CASCADE)
-    agent = models.ForeignKey(Agent, on_delete=models.CASCADE)
-    item = models.ForeignKey(Item, on_delete=models.CASCADE)  # Changed from waste to item
-    quantity = models.FloatField()
-    price = models.DecimalField(max_digits=12, decimal_places=2)
-    message = models.TextField(blank=True, null=True)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
-    sender_is_agent = models.BooleanField(default=True)
-    parent_offer = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return f"Offer for {self.item.name} - {self.status}"
-    
-class Message(models.Model):
-    offer = models.ForeignKey(Offer, on_delete=models.CASCADE, related_name='messages')
-    sender_is_agent = models.BooleanField()  # True if sent by agent, False if by member
-    content = models.TextField()
+
+class NegotiationSession(models.Model):
+    agent      = models.ForeignKey(Agent,  on_delete=models.CASCADE)
+    member     = models.ForeignKey(Member, on_delete=models.CASCADE)
+    item       = models.ForeignKey(Item,   on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        unique_together = ('agent','member','item')
+
     def __str__(self):
-        sender = "Agent" if self.sender_is_agent else "Member"
-        return f"{sender} message for offer #{self.offer.id}"
+        return f"{self.member} ↔ {self.agent} on {self.item}"
+
+
+class Offer(models.Model):
+    session         = models.ForeignKey(NegotiationSession,
+                                        on_delete=models.CASCADE,
+                                        related_name='offers')
+    price           = models.DecimalField(max_digits=12, decimal_places=2)
+    quantity        = models.FloatField()
+    STATUS_CHOICES  = [
+        ('pending','Pending'),
+        ('accepted','Accepted'),
+        ('rejected','Rejected'),
+        ('countered','Countered'),
+    ]
+    status          = models.CharField(max_length=10,
+                                       choices=STATUS_CHOICES,
+                                       default='pending')
+    sender_is_agent = models.BooleanField()
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        who = "Agent" if self.sender_is_agent else "Member"
+        return f"{who} offer {self.price}"
+
+
+class ChatMessage(models.Model):
+    session         = models.ForeignKey(NegotiationSession,
+                                        on_delete=models.CASCADE,
+                                        related_name='messages')
+    sender_is_agent = models.BooleanField()
+    content         = models.TextField()
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        who = "Agent" if self.sender_is_agent else "Member"
+        return f"{who}: {self.content[:20]}…"
+    
+    
+# # Update Offer model to use Item instead of Waste
+# class Offer(models.Model):
+#     STATUS_CHOICES = [
+#         ('pending', 'Pending'),
+#         ('accepted', 'Accepted'),
+#         ('rejected', 'Rejected'),
+#         ('countered', 'Countered'),
+#     ]
+    
+#     member = models.ForeignKey(Member, on_delete=models.CASCADE)
+#     agent = models.ForeignKey(Agent, on_delete=models.CASCADE)
+#     item = models.ForeignKey(Item, on_delete=models.CASCADE)  # Changed from waste to item
+#     quantity = models.FloatField()
+#     price = models.DecimalField(max_digits=12, decimal_places=2)
+#     message = models.TextField(blank=True, null=True)
+#     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+#     sender_is_agent = models.BooleanField(default=True)
+#     parent_offer = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True)
+#     created_at = models.DateTimeField(auto_now_add=True)
+    
+#     def __str__(self):
+#         return f"Offer for {self.item.name} - {self.status}"
+    
+# class Message(models.Model):
+    # offer = models.ForeignKey(Offer, on_delete=models.CASCADE, related_name='messages')
+    # sender_is_agent = models.BooleanField()  # True if sent by agent, False if by member
+    # content = models.TextField()
+    # created_at = models.DateTimeField(auto_now_add=True)
+
+    # def __str__(self):
+    #     sender = "Agent" if self.sender_is_agent else "Member"
+    #     return f"{sender} message for offer #{self.offer.id}"
