@@ -517,3 +517,34 @@ class GoogleOAuthCallbackAPIView(APIView):
             return Response({
                 'error': f'OAuth authentication failed: {str(e)}'
             }, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_member_profile(request, member_id):
+    """Get member profile by ID"""
+    try:
+        member = Member.objects.get(id=member_id)
+        serializer = MemberSerializer(member)
+        return Response(serializer.data)
+    except Member.DoesNotExist:
+        return Response({
+            'error': 'Member not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_agent_profile(request, agent_id):
+    """Get agent profile by agent ID"""
+    try:
+        from agent.models import Agent
+        agent = Agent.objects.select_related('user').get(id=agent_id)
+        member_serializer = MemberSerializer(agent.user)
+        
+        response_data = member_serializer.data
+        response_data['agent_id'] = agent.id
+        
+        return Response(response_data)
+    except Agent.DoesNotExist:
+        return Response({
+            'error': 'Agent not found'
+        }, status=status.HTTP_404_NOT_FOUND)

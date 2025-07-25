@@ -10,12 +10,16 @@ urlpatterns = [
     path('verify/<str:token>/', views.verify_member_email, name='verify_member_email'),
     path('choose-role/', views.choose_role, name='choose_role'),
 
+    path('profile/<int:member_id>/', views.get_member_profile, name='api_member_profile'),
+    path('agent/profile/<int:agent_id>/', views.get_agent_profile, name='api_agent_profile'),
         # API URLs baru
     path('api/register/', views.RegisterAPIView.as_view(), name='api_register'),
     path('api/login/', views.LoginAPIView.as_view(), name='api_login'),
     path('api/logout/', views.LogoutAPIView.as_view(), name='api_logout'),
     path('api/profile/', views.ProfileAPIView.as_view(), name='api_profile'),
     path('api/verify/<str:token>/', views.VerifyEmailAPIView.as_view(), name='api_verify_email'),
+
+    # Profile by ID endpoints
 
     # OAuth URLs
     path('api/oauth/google/', views.GoogleOAuthLoginAPIView.as_view(), name='api_oauth_google'),
@@ -26,4 +30,4 @@ urlpatterns = [
     
     # JWT token endpoints
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-] 
+]
